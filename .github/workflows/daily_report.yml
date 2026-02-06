@@ -2,9 +2,9 @@ name: FX Daily Report Automation
 
 on:
   schedule:
-    # 毎日 日本時間 06:30 (UTC 21:30) に実行
-    - cron: '30 21 * * *'
-  workflow_dispatch: # 手動でテスト実行するためのボタン
+    # 日本時間の火〜土の朝に配信（サーバー混雑を考慮し6:15に設定）
+    - cron: '15 21 * * 1-5'
+  workflow_dispatch: # 手動実行用ボタン
 
 jobs:
   build:
@@ -20,7 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install yfinance mplfinance google-generativeai requests pandas
+          pip install yfinance google-generativeai requests pandas
 
       - name: Run script
         env:
