@@ -2,9 +2,9 @@ name: FX Daily Report Automation
 
 on:
   schedule:
-    # 日本時間の火〜土の朝に配信（サーバー混雑を考慮し6:15に設定）
+    # 日本時間の火〜土の朝に配信（6:15設定）
     - cron: '15 21 * * 1-5'
-  workflow_dispatch: # 手動実行用ボタン
+  workflow_dispatch:
 
 jobs:
   build:
