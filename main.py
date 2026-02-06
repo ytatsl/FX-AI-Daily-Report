@@ -1,10 +1,10 @@
 import os
+import datetime
 import yfinance as yf
-import mplfinance as mpf
 import google.generativeai as genai
 import requests
 
-# 1. 環境変数の読み込み（GitHub Secretsから取得）
+# 1. 環境変数の読み込み
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
 LINE_USER_ID = os.getenv("LINE_USER_ID")
@@ -13,42 +13,40 @@ LINE_USER_ID = os.getenv("LINE_USER_ID")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
-def get_fx_data_and_charts(symbol):
-    # チャート作成用のデータを取得
-    # 週足(1年), 日足(3ヶ月), 4時間足(1ヶ月)
-    data_w = yf.download(symbol, period='1y', interval='1wk')
-    data_d = yf.download(symbol, period='3mo', interval='1d')
-    data_4h = yf.download(symbol, period='1mo', interval='1h') # yfinanceは1hからリサンプリング
-
-    # チャート画像を保存
-    paths = []
-    for tf, df in zip(['weekly', 'daily', '4h'], [data_w, data_d, data_4h]):
-        path = f"{symbol}_{tf}.png"
-        mpf.plot(df, type='candle', style='charles', savefig=path)
-        paths.append(path)
-    return paths
-
 def main():
-    pairs = ["USDJPY=X", "EURUSD=X"]
-    full_report = "【FX Morning Report 6:30】\n"
+    # 実行日の日付を自動取得
+    today = datetime.date.today().strftime('%Y年%m月%d日')
     
-    for pair in pairs:
-        # 価格情報の取得（定量データ用）
-        ticker = yf.Ticker(pair)
-        current_price = ticker.history(period='1d')['Close'].iloc[-1]
-        
-        # ニュース・トレンド分析の指示
-        prompt = f"""
-        通貨ペア: {pair} (現在値: {current_price:.2f})
-        
-        以下の条件で、FX熟練者向けに1日の情報をまとめてください：
-        1. トランプ関税政策や国内政局（衆院選・日銀）などの世界情勢トレンドを含め、大きな流れを解説。
-        2. インジケーターは無視し、週足・日足・4時間足の「価格の動き（プライスアクション）」にのみ着目して現状を整理。
-        3. 科学的根拠（統計的期待値や市場の織り込み度）に基づき、本日の注目ポイントを定量的に記述。
-        """
-        
-        response = model.generate_content(prompt)
-        full_report += f"\n--- {pair} ---\n{response.text}\n"
+    # 通貨ペア（ yfinance用）
+    pairs = ["USDJPY=X", "EURUSD=X"]
+    
+    # AIへの指示（最新ルール・デザイン・日付情報を反映）
+    prompt = f"""
+    【重要】本日は {today} です。
+    
+    あなたはプロのFXストラテジスト兼、人気LINEマガジンの編集者です。
+    USD/JPYとEUR/USDについて、投資家に届ける「朝刊レポート」を作成してください。
+    
+    ■ 配信ルール（厳守）
+    1. 【冒頭】文章の最初には必ず「{today} のFX朝刊レポート」というタイトルを入れて始めてください。
+    2. 【情報鮮度】直近24時間の最新材料に絞って伝えること。ただし、文脈の関係から今週先週や今月先月などの情報を書いた方が伝わりやすいと判断した場合は追加で書いても良い。2025年の古い情報は文脈上必要がない限り除外すること。
+    3. 【視認性】スマホで読みやすいよう、以下の装飾を多用すること。
+       - セクションの区切りには「━━━━━━━━━━━━」を使用。
+       - 見出しには ▷▷ や 【 】 を使う。
+       - 箇条書きには 💰、📈、⚠️ などの絵文字を1行ごとに使う。
+       - 適宜、空白行を入れて文章が詰まりすぎないようにする。
+    4. 【分析】価格の動き（プライスアクション）に集中し、具体的な節目価格（何円、何ドル）を定量的に出すこと。
+
+    ■ 構成
+    【1】本日のマーケット概況（🌍）
+    【2】USD/JPY 分析（🇯🇵🇺🇸）
+    【3】EUR/USD 分析（🇪🇺🇺🇸）
+    【4】本日の注目イベント（⏰）
+    """
+
+    # AI解析実行
+    response = model.generate_content(prompt)
+    report_text = response.text
 
     # LINE送信
     url = "https://api.line.me/v2/bot/message/push"
@@ -58,7 +56,7 @@ def main():
     }
     payload = {
         "to": LINE_USER_ID,
-        "messages": [{"type": "text", "text": full_report}]
+        "messages": [{"type": "text", "text": report_text}]
     }
     requests.post(url, headers=headers, json=payload)
 
