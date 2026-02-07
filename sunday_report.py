@@ -12,29 +12,34 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
 def main():
-    # 日付の計算（自動化のキモ）
+    # 実行時の「年・月・日」をすべて自動取得
     now = datetime.datetime.now()
+    current_year = now.year  # 2026, 2027...と自動で変わる
     today_str = now.strftime('%Y年%m月%d日')
     
-    # 「来週（明日月曜日から来週日曜日まで）」の期間を計算
-    next_monday = (now + datetime.timedelta(days=1)).strftime('%m月%d日')
-    next_sunday = (now + datetime.timedelta(days=7)).strftime('%m月%d日')
-    calendar_period = f"{next_monday}〜{next_sunday}"
+    # 来週の期間を計算
+    next_monday_dt = now + datetime.timedelta(days=1)
+    next_sunday_dt = now + datetime.timedelta(days=7)
+    
+    # AIに渡すための期間テキスト
+    next_monday_str = next_monday_dt.strftime('%m月%d日')
+    next_sunday_str = next_sunday_dt.strftime('%m月%d日')
+    calendar_period = f"{next_monday_str}〜{next_sunday_str}"
 
-    # AIへの指示（日付計算をAIに任せず、プログラムが教える）
+    # AIへの指示（年・月・日をすべて変数で渡す）
     prompt = f"""
     【最優先：日付の整合性】
     本日は {today_str}（日曜日）です。
-    分析対象となる「来週」とは、明日からの【{calendar_period}】の期間を指します。
+    分析対象となる「来週」とは、{current_year}年の【{calendar_period}】の期間を指します。
     
     ■ 厳守事項
-    1. 2026年のカレンダーに基づき、{calendar_period} 内に行われる経済指標の「正しい日付と曜日」を検索して確定させてください。
-    2. CPI、雇用統計、中銀政策決定会合など、主要指標の日付ミスは専門家として致命的です。必ず複数のニュースソースから照合してください。
-    3. 「来週の展望」としながら、先週や先々週の古い予定を記載することは絶対に避けてください。
+    1. {current_year}年のカレンダーに基づき、{calendar_period} 内に行われる経済指標の「正しい日付と曜日」を検索して確定させてください。
+    2. CPI、雇用統計、中銀政策決定会合など、主要指標の日付ミスは専門家として致命的です。必ず最新のソースと照合してください。
+    3. 「来週の展望」において、過去の年度や古い月の情報を混ぜることは絶対に避けてください。
 
     ■ 執筆ルール
-    💰 1週間の総括：先週の材料（政局、中銀発言、コモディティ等）の因果関係。
-    📈 来週の展望：ファンダメンタルズ重視（政治・経済・金利政策）で、テクニカルは補足程度。
+    💰 1週間の総括：先週の材料（政局、中銀発言、商品市場等）の因果関係を整理。
+    📈 来週の展望：ファンダメンタルズ（政治・経済・金利政策）に特化。
     ⚠️ 視認性：1行ごとに絵文字（💰、📈、⚠️、🌍等）を使用。
     📊 フォーマット：見出し「【1】見出し🌍」、区切り「━━━━━━━━━━━━」。
 
