@@ -3,68 +3,98 @@ import datetime
 import yfinance as yf
 import google.generativeai as genai
 import requests
+import pandas as pd
 
 # 1. 環境変数の読み込み
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 LINE_ACCESS_TOKEN = os.getenv("LINE_ACCESS_TOKEN")
 LINE_USER_ID = os.getenv("LINE_USER_ID")
 
-# 2. Geminiの初期化
+# 2. Geminiの初期化 (最新版指定)
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
+def calculate_ma(df, window=20):
+    """SMAとEMAを計算して最新値を返す"""
+    sma = df['Close'].rolling(window=window).mean().iloc[-1]
+    ema = df['Close'].ewm(span=window, adjust=False).mean().iloc[-1]
+    return sma, ema
+
+def get_technical_data(symbol):
+    ticker = yf.Ticker(symbol)
+    
+    # 日足データ (20MA計算用)
+    df_d = ticker.history(period="6mo", interval="1d")
+    d_sma, d_ema = calculate_ma(df_d)
+    d_close = df_d['Close'].iloc[-1]
+    d_high = df_d['High'].iloc[-1]
+    d_low = df_d['Low'].iloc[-1]
+    
+    # 4時間足データ
+    df_4h = ticker.history(period="1mo", interval="4h")
+    h4_sma, h4_ema = calculate_ma(df_4h)
+    
+    # 週足データ
+    df_w = ticker.history(period="1y", interval="1wk")
+    w_sma, w_ema = calculate_ma(df_w)
+    
+    return {
+        "close": d_close, "high": d_high, "low": d_low,
+        "d_sma": d_sma, "d_ema": d_ema,
+        "h4_sma": h4_sma, "h4_ema": h4_ema,
+        "w_sma": w_sma, "w_ema": w_ema
+    }
+
 def main():
-    # 日付と曜日の取得
     now = datetime.datetime.now()
     weekdays_ja = ['月', '火', '水', '木', '金', '土', '日']
     today_str = now.strftime('%Y年%m月%d日')
-    weekday_str = weekdays_ja[now.weekday()] # 自動で現在の曜日を取得
-    
-    # yfinanceから「嘘のつけない」実数値を取得
-    try:
-        # 直近2日分のデータを取得して前日比も出せるようにする
-        uj = yf.Ticker("USDJPY=X").history(period='2d')
-        eu = yf.Ticker("EURUSD=X").history(period='2d')
-        
-        uj_close = uj['Close'].iloc[-1]
-        uj_high = uj['High'].iloc[-1]
-        uj_low = uj['Low'].iloc[-1]
-        uj_prev = uj['Close'].iloc[-2]
-        uj_diff = uj_close - uj_prev
-        
-        eu_close = eu['Close'].iloc[-1]
-        eu_high = eu['High'].iloc[-1]
-        eu_low = eu['Low'].iloc[-1]
-        eu_prev = eu['Close'].iloc[-2]
-        eu_diff = eu_close - eu_prev
-        
-        market_stats = f"""
-        【最新マーケット実数値】
-        ・USD/JPY: 終値 {uj_close:.2f} (前日比 {uj_diff:+.2f}) / 高値 {uj_high:.2f} / 安値 {uj_low:.2f}
-        ・EUR/USD: 終値 {eu_close:.4f} (前日比 {eu_diff:+.4f}) / 高値 {eu_high:.4f} / 安値 {eu_low:.4f}
-        """
-    except Exception as e:
-        market_stats = "データ取得エラー。最新チャートを確認してください。"
+    weekday_str = weekdays_ja[now.weekday()]
 
-    # AIへの指示：プロの時系列レポートを再現
+    # テクニカル指標の取得
+    uj = get_technical_data("USDJPY=X")
+    eu = get_technical_data("EURUSD=X")
+
+    # データをAIに渡す用のテキスト
+    tech_data_text = f"""
+    【USD/JPY リアルタイム数値】
+    ・終値: {uj['close']:.2f} / 高値: {uj['high']:.2f} / 安値: {uj['low']:.2f}
+    ・日足20MA: SMA {uj['d_sma']:.2f} / EMA {uj['d_ema']:.2f}
+    ・4H足20MA: SMA {uj['h4_sma']:.2f} / EMA {uj['h4_ema']:.2f}
+    ・週足20MA: SMA {uj['w_sma']:.2f} / EMA {uj['w_ema']:.2f}
+
+    【EUR/USD リアルタイム数値】
+    ・終値: {eu['close']:.4f} / 高値: {eu['high']:.4f} / 安値: {eu['low']:.4f}
+    ・日足20MA: SMA {eu['d_sma']:.4f} / EMA {eu['d_ema']:.4f}
+    ・4H足20MA: SMA {eu['h4_sma']:.4f} / EMA {eu['h4_ema']:.4f}
+    ・週足20MA: SMA {eu['w_sma']:.4f} / EMA {eu['w_ema']:.4f}
+    """
+
+    # AIへの指示（提供された理想の文章を再現）
     prompt = f"""
     本日は {today_str}（{weekday_str}曜日）です。
-    為替アナリストとして、直近の「東京市場」「ロンドン市場」「ニューヨーク市場」の3市場の流れを総括してください。
+    以下の【リアルタイム数値】に基づき、プロの為替アナリストとして最高品質の朝刊レポートを執筆してください。
 
-    ■ 執筆ガイドライン（プロの流儀）
-    1. 【時系列のバトンタッチ】「東京では〜」「ロンドンでは〜」「NYでは〜」という流れで、各市場での主要な材料（要人発言、経済指標、金利、地政学、商品市場のボラティリティ等）がどう連鎖したか記述すること。
-    2. 【多角的な材料把握】特定のトピックだけでなく、日米欧の政局（選挙等）、中銀当局者の発言変化、実需の動き、テクニカル的な節目での攻防を網羅すること。
-    3. 【不要な挨拶の排除】「市場が閉場した」等の冗長な説明は一切不要。冒頭から具体的な値動きとその背景から書き始めること。
-    4. 【数字の絶対遵守】以下の実数値を使い、それと矛盾する解説（157円なのに156円と書く等）は厳禁。
-    {market_stats}
+    ■ 執筆スタイル（徹底再現）
+    1. 構成: 「前日の振り返り」→「通貨別の詳細（前日動向）」→「本日の経済指標・イベント」の流れ。
+    2. テクニカル分析: 提供した「4時間足・日足・週足の20MA(SMA/EMA)」を必ず引用し、現在値との乖離やサポート・レジスタンスとしての機能性を論理的に解説すること。
+    3. プロの視点: フィボナッチ（数値からの推測）、一目均衡表、当局の介入警戒、政局（衆院選等）、実需の動きを適宜織り交ぜること。
+    4. 語り口: 冗長な挨拶は省き、格調高く、かつ scannable（読みやすい）な形式。
 
-    ■ 構成
-    【1】本日のマーケット概況🌍（3市場の時系列・因果関係の詳述）
-    【2】USD/JPY 分析🇯🇵🇺🇸（日米の政局・金利差・実需の視点）
-    【3】EUR/USD 分析🇪🇺🇺🇸（欧州材料とドルの強弱）
-    【4】今後の展望と注目イベント⏰（次週の重要指標や政治リスクへの備え）
-    
-    ※ 見出しに「###」や「()」は使用禁止。区切りは「━━━━━━━━━━━━」。
+    {tech_data_text}
+
+    ■ 構成案
+    前日のドル円・ユーロドル相場振り返り
+    （東京→ロンドン→NYの流れと、ファンダメンタルズの相関）
+    ━━━━━━━━━━━━
+    ドル/円（USD/JPY）の前日動向
+    （数値に基づき、20MAとの位置関係や重要水準、当局の警戒感を詳述）
+    ━━━━━━━━━━━━
+    ユーロ/ドル（EUR/USD）の前日動向
+    （欧州情勢とドルの強弱、テクニカル面での戻り売り圧力を解説）
+    ━━━━━━━━━━━━
+    本日の主な経済指標・イベント
+    （発表予定とその予想値、市場への影響度を定量的に記述）
     """
 
     # 解析実行
