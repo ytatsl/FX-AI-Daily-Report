@@ -29,7 +29,7 @@ jobs:
         run: |
           # 曜日を取得 (0=Sun, 1=Mon, ..., 6=Sat)
           DAY_OF_WEEK=$(date +%w)
-          if [ "$DAY_OF_WEEK" -eq 6 ]; then
+          if [ "$DAY_OF_WEEK" -eq 0 ]; then
             echo "Running Sunday Report..."
             python sunday_report.py
           else
