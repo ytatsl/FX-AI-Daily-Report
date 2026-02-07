@@ -1,9 +1,8 @@
-name: FX Daily Report Automation
+name: FX Morning Report
 
 on:
   schedule:
-    # 日本時間の火〜土の朝に配信（6:15設定）
-    - cron: '15 21 * * 1-5'
+    - cron: '15 21 * * *' # 日本時間 朝6:15
   workflow_dispatch:
 
 jobs:
@@ -11,20 +10,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: '3.9'
 
       - name: Install dependencies
         run: |
           pip install yfinance google-generativeai requests pandas
 
-      - name: Run script
+      - name: Run Daily or Sunday Report
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LINE_ACCESS_TOKEN: ${{ secrets.LINE_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
-        run: python main.py
+        run: |
+          # 曜日を取得 (0=Sun, 1=Mon, ..., 6=Sat)
+          DAY_OF_WEEK=$(date +%w)
+          if [ "$DAY_OF_WEEK" -eq 0 ]; then
+            echo "Running Sunday Report..."
+            python sunday_report.py
+          else
+            echo "Running Daily Report..."
+            python main.py
+          fi
