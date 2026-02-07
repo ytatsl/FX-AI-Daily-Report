@@ -14,29 +14,37 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
 def main():
-    # 実行日の日付を取得
+    # 日付の計算（AIの混乱を防ぐ）
     now = datetime.datetime.now()
     today_str = now.strftime('%Y年%m月%d日')
+    yesterday_str = (now - datetime.timedelta(days=1)).strftime('%Y年%m月%d日')
+    tomorrow_str = (now + datetime.timedelta(days=1)).strftime('%Y年%m月%d日')
     
-    # 実際の現在レートを取得
+    # 実際のリアルタイムレートを取得
     try:
-        usdjpy_rate = round(yf.Ticker("USDJPY=X").history(period='1d')['Close'].iloc[-1], 2)
-        eurusd_rate = round(yf.Ticker("EURUSD=X").history(period='1d')['Close'].iloc[-1], 4)
+        # 直近の終値を取得
+        usdjpy_ticker = yf.Ticker("USDJPY=X")
+        eurusd_ticker = yf.Ticker("EURUSD=X")
+        usdjpy_rate = round(usdjpy_ticker.history(period='1d')['Close'].iloc[-1], 2)
+        eurusd_rate = round(eurusd_ticker.history(period='1d')['Close'].iloc[-1], 4)
     except Exception as e:
         usdjpy_rate = "157.20前後(取得エラー)"
         eurusd_rate = "1.0800前後(取得エラー)"
     
-    # AIへの指示（3大市場の網羅とファンダメンタルズ深掘り）
+    # AIへの指示（時間軸のズレを物理的に修正）
     prompt = f"""
-    【重要】本日は {today_str} です。
-    FX熟練者向けの「朝刊マガジン」を作成してください。
+    【重要：時間軸の設定】
+    本日は {today_str}（土曜）の朝です。
+    ・「昨晩」とは、{yesterday_str}（金曜）のニューヨーク市場のことです。
+    ・「昨日」とは、{yesterday_str}（金曜）の東京・欧州市場のことです。
     
-    ■ 分析のポイント（厳守）
-    1. 【3大市場の推移】直近24時間の「東京・ロンドン・ニューヨーク」各市場の主要な動きを時系列で整理し、それぞれの市場がどう為替に影響を与えたか分析してください。
-    2. 【世界情勢・ファンダメンタルズ】
-       - トランプ政権の経済政策、日銀・FRB・ECBの金融政策の方向性、地政学リスクなど、大局的な流れを詳しく記述すること。
-       - それらの材料が、直近のプライスアクションにどう繋がっているかの因果関係を明確にすること。
-    3. 【鮮度】実行時点から遡って24時間の情報を最優先。古いニュース（数日前など）は、今のトレンドを説明するための背景としてのみ使用すること。
+    あなたは今、{yesterday_str}の全市場が閉まった直後の最新データを分析しています。
+    この前提に基づき、FX熟練者向けの朝刊レポートを作成してください。
+
+    ■ 分析のポイント
+    1. 【3大市場の完結】{yesterday_str}の東京・ロンドン・ニューヨーク市場の一連の流れを総括すること。特に昨晩のNY終値時点での大局を書いてください。
+    2. 【ファンダメンタルズ】世界情勢（トランプ政権、金利差、地政学）がどう相場を支配したか深掘りすること。
+    3. 【情報の整合性】現在のレート（USD/JPY:{usdjpy_rate} / EUR/USD:{eurusd_rate}）と矛盾する、1日前の古い価格データは絶対に使わないこと。
 
     ■ 配信ルール
     1. 【冒頭】必ず「{today_str} のFX朝刊レポート」というタイトルから始めてください。
@@ -45,13 +53,13 @@ def main():
        - セクションの区切りには「━━━━━━━━━━━━」を使用。
        - 見出し例：【1】本日のマーケット概況🌍
        - 箇条書きには 💰、📈、⚠️ などの絵文字を1行ごとに使う。
-    3. 【定量分析】今のレート（USD/JPY:{usdjpy_rate} / EUR/USD:{eurusd_rate}）に基づいた具体的な節目価格を提示すること。
+    3. 【土日の扱い】本日は土曜で市場が閉まるため、週明けの展望や、週末の注目材料に触れてください。
 
     ■ 構成
-    【1】本日のマーケット概況🌍（東京・欧州・米国の流れ）
-    【2】USD/JPY 分析🇯🇵🇺🇸（世界情勢と連動した分析）
-    【3】EUR/USD 分析🇪🇺🇺🇸（欧州経済とドルの強弱）
-    【4】本日の注目イベント⏰
+    【1】本日のマーケット概況🌍（昨日から今朝にかけての全市場の流れ）
+    【2】USD/JPY 分析🇯🇵🇺🇸（ファンダメンタルズ重視）
+    【3】EUR/USD 分析🇪🇺🇺🇸（欧州とドルの強弱関係）
+    【4】今後の注目イベント⏰（週明けの予定など）
     """
 
     # AI解析実行
