@@ -1,7 +1,8 @@
 import os
-import google.generativeai as genai
+import re
 import requests
 import feedparser
+import google.generativeai as genai
 from youtube_transcript_api import YouTubeTranscriptApi
 
 # 1. 環境変数
@@ -13,24 +14,23 @@ LINE_USER_ID = os.getenv("LINE_USER_ID")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
-# 3. チャンネル設定（RSSフィードURLを使用）
-# YouTubeのRSSは "https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID" の形式
+# 3. チャンネル設定（URLは @handle のままでOK！）
 CHANNELS = [
     {
         "name": "竹内のりひろ（ガチプロFX）",
-        "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCt8mRNDt9M0qC1QWunH660g", 
+        "url": "https://www.youtube.com/@gachipro",
         "filter_type": "latest",
         "keywords": []
     },
     {
         "name": "FXトレードルーム（ひろぴー）",
-        "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCbZt50s89QUHt96Yv6oT8Ew",
+        "url": "https://www.youtube.com/@FX-traderoom",
         "filter_type": "latest",
         "keywords": []
     },
     {
         "name": "ユーチェル（Yucheru）",
-        "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCfQc4075b94k60_i1pM1jRQ",
+        "url": "https://www.youtube.com/@fx-yucheru",
         "filter_type": "smart_select",
         "exclude": ["初心者", "手法", "メンタル", "対談", "勉強", "マインド", "Live"],
         "include": ["展望", "分析", "ファンダ", "週明け", "来週", "雇用統計", "CPI", "FOMC", "予想"]
@@ -46,25 +46,52 @@ def load_processed_ids():
 def save_processed_id(video_id):
     with open(HISTORY_FILE, "a") as f: f.write(video_id + "\n")
 
-def get_latest_video_from_rss(channel_conf):
-    """RSSフィードから最新動画を取得（軽量・確実）"""
-    print(f"Checking RSS: {channel_conf['name']}...")
+def get_channel_id(url):
+    """チャンネルURLから正しいID(UC...)をスクレイピングで取得"""
     try:
-        feed = feedparser.parse(channel_conf['rss_url'])
+        # ブラウザのふりをしてアクセス
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        res = requests.get(url, headers=headers)
+        
+        # HTML内から channelId を探す
+        match = re.search(r'"channelId":"(UC[\w-]+)"', res.text)
+        if match:
+            return match.group(1)
+        
+        # 別のパターン（metaタグ）も探す
+        match_meta = re.search(r'<meta itemprop="channelId" content="(UC[\w-]+)">', res.text)
+        if match_meta:
+            return match_meta.group(1)
+            
+        return None
+    except Exception as e:
+        print(f"ID取得エラー: {e}")
+        return None
+
+def get_latest_video_from_rss(channel_conf):
+    """RSSフィードから最新動画を取得"""
+    print(f"Checking: {channel_conf['name']}...")
+    
+    # 1. まず正しいチャンネルIDを取得
+    channel_id = get_channel_id(channel_conf['url'])
+    if not channel_id:
+        print(f" -> ❌ チャンネルID特定失敗")
+        return None
+        
+    rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    
+    try:
+        feed = feedparser.parse(rss_url)
         
         if not feed.entries:
-            print(f" -> 記事なし")
+            print(f" -> 記事なし (RSS取得成功だが空)")
             return None
 
-        # 最新の記事（動画）をチェック
-        # RSSフィードは通常最新順に並んでいるので、上から順にチェック
+        # 最新3件チェック
         for entry in feed.entries[:3]:
             video_id = entry.yt_videoid
             title = entry.title
             link = entry.link
-            
-            # メンバー限定などのチェックはタイトルからは完全には分からないが、
-            # 字幕取得時にエラーが出るのでそこで弾く
             
             # フィルタリング
             is_match = False
@@ -86,13 +113,11 @@ def get_latest_video_from_rss(channel_conf):
         return None
 
 def get_transcript_text(video_id):
-    """字幕取得（ここが最後の砦）"""
     try:
         transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja'])
         full_text = " ".join([t['text'] for t in transcript_list])
         return full_text[:20000]
     except Exception:
-        # 自動生成字幕にトライ
         try:
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en'])
             full_text = " ".join([t['text'] for t in transcript_list])
@@ -101,82 +126,4 @@ def get_transcript_text(video_id):
             return None
 
 def send_line(text):
-    url = "https://api.line.me/v2/bot/message/push"
-    headers = { "Content-Type": "application/json", "Authorization": f"Bearer {LINE_ACCESS_TOKEN}" }
-    payload = { "to": LINE_USER_ID, "messages": [{"type": "text", "text": text}] }
-    try:
-        requests.post(url, headers=headers, json=payload)
-    except Exception as e:
-        print(f"LINE送信エラー: {e}")
-
-def main():
-    print("=== RSS版 動画監視スタート ===")
-    processed_ids = load_processed_ids()
-    new_videos_found = False
-
-    for ch in CHANNELS:
-        video = get_latest_video_from_rss(ch)
-        
-        if not video:
-            continue
-            
-        if video['id'] in processed_ids:
-            print(f" -> Skip (既読): {video['title']}")
-            continue
-
-        print(f"★ New Video Hit: {video['title']}")
-        transcript = get_transcript_text(video['id'])
-        
-        if not transcript:
-            print(" -> ❌ 字幕取得失敗（メンバー限定か、字幕オフの可能性）")
-            # 字幕が取れない場合も「既読」にしておかないと毎回トライしてしまうため、
-            # ここでsaveするかは運用次第だが、今回はsaveせず再トライさせる（いつか字幕つくかも）
-            continue
-
-        # AI分析（NotebookLMの要約機能を再現）
-        prompt = f"""
-        あなたはプロのFXストラテジストです。
-        以下のYouTube動画（{video['author']}）の内容を、NotebookLMのように高精度に要約してください。
-        
-        ■ 動画タイトル: {video['title']}
-        ■ 動画の内容（字幕）:
-        {transcript}
-
-        ■ レポート作成指示
-        1. **要点速報**: 相場の変動要因と結論を3行で。
-        2. **トレード戦略**: 具体的に「どの通貨ペア」を「どの価格」で「どうする（ロング/ショート）」か。
-        3. **プロの知見**: 金利、オプション、機関投資家の動向など、素人が気づかないポイント。
-        
-        ■ 出力形式
-        【速報】{video['author']}の最新分析📺
-        ━━━━━━━━━━━━
-        Title: {video['title']}
-        URL: {video['url']}
-        
-        【1】要点サマリ🌍
-        (要約)
-        
-        【2】トレード戦略💰
-        (戦略)
-        
-        【3】プロの知見📊
-        (重要発言)
-        """
-        
-        try:
-            print(" -> AI解析中...")
-            response = model.generate_content(prompt)
-            report_text = response.text
-            send_line(report_text)
-            save_processed_id(video['id'])
-            new_videos_found = True
-            print(" -> ✅ 送信完了！")
-            
-        except Exception as e:
-            print(f"Gemini Error: {e}")
-
-    if not new_videos_found:
-        print("新しい未読動画はありませんでした。")
-
-if __name__ == "__main__":
-    main()
+    url = "
