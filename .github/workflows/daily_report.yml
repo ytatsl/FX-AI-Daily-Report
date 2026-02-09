@@ -2,7 +2,7 @@ name: FX Video Monitor
 
 on:
   schedule:
-    - cron: '0 * * * *'    # 毎時0分に実行（60分おき）
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -18,11 +18,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.11' # 3.11 に変更
 
       - name: Install dependencies
         run: |
-          pip install google-generativeai requests yt-dlp youtube-transcript-api
+          # yt-dlp を強制的に最新版にする (-U)
+          pip install -U google-generativeai requests yt-dlp youtube-transcript-api
           
       - name: Run Monitor Script
         env:
