@@ -13,23 +13,23 @@ LINE_USER_ID = os.getenv("LINE_USER_ID")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
-# 3. チャンネル設定（URLを /videos 付きに修正）
+# 3. チャンネル設定（URLを最も安定する形式に変更）
 CHANNELS = [
     {
         "name": "竹内のりひろ（ガチプロFX）",
-        "url": "https://www.youtube.com/@gachipro/videos", # 末尾に/videosを追加
+        "url": "https://www.youtube.com/@gachipro", # 末尾の/videosを削除
         "filter_type": "latest",
         "keywords": []
     },
     {
         "name": "FXトレードルーム（ひろぴー）",
-        "url": "https://www.youtube.com/@FX-traderoom/videos", # 末尾に/videosを追加
+        "url": "https://www.youtube.com/@FX-traderoom", # 末尾の/videosを削除
         "filter_type": "latest",
         "keywords": []
     },
     {
         "name": "ユーチェル（Yucheru）",
-        "url": "https://www.youtube.com/@fx-yucheru/videos", # 末尾に/videosを追加
+        "url": "https://www.youtube.com/@fx-yucheru", # 末尾の/videosを削除
         "filter_type": "smart_select",
         "exclude": ["初心者", "手法", "メンタル", "対談", "勉強", "マインド"],
         "include": ["展望", "分析", "ファンダ", "週明け", "来週", "雇用統計", "CPI", "FOMC"]
@@ -46,30 +46,38 @@ def save_processed_id(video_id):
     with open(HISTORY_FILE, "a") as f: f.write(video_id + "\n")
 
 def get_video_info(channel_conf):
-    # エラー回避のため設定を強化
+    print(f"Checking URL: {channel_conf['url']}")
     ydl_opts = {
         'quiet': True,
         'extract_flat': True,
         'playlistend': 5,
-        'ignoreerrors': True, # エラーでも止まらない
+        'ignoreerrors': True,
     }
     
     with YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(channel_conf['url'], download=False)
-            if 'entries' not in info: return None
+            
+            # 【修正】ここがエラーの原因でした。infoがNoneの場合の対策を追加
+            if not info:
+                print(f" -> ⚠️ 取得失敗 (Info is None): {channel_conf['name']}")
+                return None
+                
+            if 'entries' not in info:
+                print(f" -> ⚠️ 動画リストが見つかりません: {channel_conf['name']}")
+                return None
 
             for video in info['entries']:
-                if not video: continue # データが空ならスキップ
+                if not video: continue
                 title = video.get('title', 'No Title')
                 video_id = video.get('id')
                 
-                # 【重要】メンバー限定動画をスキップ
+                # メンバー限定スキップ
                 if "メンバー" in title or "Member" in title:
-                    print(f"Skip (Member Only): {title}")
+                    print(f" -> Skip (Member Only): {title}")
                     continue
 
-                # フィルタリングロジック
+                # フィルタリング
                 is_match = False
                 if channel_conf['filter_type'] == 'latest':
                     if "Shorts" not in title and "ショート" not in title:
@@ -81,19 +89,18 @@ def get_video_info(channel_conf):
                 
                 if is_match:
                     return {"id": video_id, "title": title, "author": channel_conf['name']}
+            
             return None
         except Exception as e:
-            print(f"URL取得エラー: {channel_conf['name']} -> {e}")
+            print(f" -> ⚠️ URL取得エラー: {e}")
             return None
 
 def get_transcript_text(video_id):
     try:
-        # 日本語字幕を優先取得
         transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja'])
         full_text = " ".join([t['text'] for t in transcript_list])
         return full_text[:20000]
     except Exception:
-        # 自動生成字幕がある場合もトライ
         try:
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en'])
             full_text = " ".join([t['text'] for t in transcript_list])
@@ -116,7 +123,6 @@ def main():
     new_videos_found = False
 
     for ch in CHANNELS:
-        print(f"Checking: {ch['name']}...")
         video = get_video_info(ch)
         
         if not video:
@@ -131,7 +137,7 @@ def main():
         transcript = get_transcript_text(video['id'])
         
         if not transcript:
-            print(" -> ❌ 字幕取得失敗（音声のみ、または字幕オフのためスキップ）")
+            print(" -> ❌ 字幕なしのためスキップ")
             continue
 
         # AI分析
