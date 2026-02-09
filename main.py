@@ -13,23 +13,26 @@ LINE_USER_ID = os.getenv("LINE_USER_ID")
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
-# 3. チャンネル設定（URLを最も安定する形式に変更）
+# 3. チャンネル設定
 CHANNELS = [
     {
         "name": "竹内のりひろ（ガチプロFX）",
-        "url": "https://www.youtube.com/@gachipro", # 末尾の/videosを削除
+        "url": "https://www.youtube.com/@gachipro/videos", 
+        "search_query": "竹内のりひろ FX", # バックアップ検索ワード
         "filter_type": "latest",
         "keywords": []
     },
     {
         "name": "FXトレードルーム（ひろぴー）",
-        "url": "https://www.youtube.com/@FX-traderoom", # 末尾の/videosを削除
+        "url": "https://www.youtube.com/@FX-traderoom/videos",
+        "search_query": "FXトレードルーム ひろぴー",
         "filter_type": "latest",
         "keywords": []
     },
     {
         "name": "ユーチェル（Yucheru）",
-        "url": "https://www.youtube.com/@fx-yucheru", # 末尾の/videosを削除
+        "url": "https://www.youtube.com/@fx-yucheru/videos",
+        "search_query": "ユーチェル FX",
         "filter_type": "smart_select",
         "exclude": ["初心者", "手法", "メンタル", "対談", "勉強", "マインド"],
         "include": ["展望", "分析", "ファンダ", "週明け", "来週", "雇用統計", "CPI", "FOMC"]
@@ -45,8 +48,29 @@ def load_processed_ids():
 def save_processed_id(video_id):
     with open(HISTORY_FILE, "a") as f: f.write(video_id + "\n")
 
+def get_video_from_search(query):
+    """URLがダメな場合のバックアップ：検索から最新動画を探す"""
+    print(f" -> 🔄 URLアクセス失敗。検索モードで再トライ: '{query}'")
+    ydl_opts = {
+        'quiet': True,
+        'extract_flat': True,
+        'playlistend': 3,
+        'ignoreerrors': True,
+    }
+    with YoutubeDL(ydl_opts) as ydl:
+        try:
+            # ytsearch3: = 検索結果の上位3つを取得
+            info = ydl.extract_info(f"ytsearch3:{query}", download=False)
+            if 'entries' in info:
+                return info['entries']
+        except Exception as e:
+            print(f" -> 検索も失敗: {e}")
+    return []
+
 def get_video_info(channel_conf):
-    print(f"Checking URL: {channel_conf['url']}")
+    print(f"Checking: {channel_conf['name']}")
+    
+    # 1. まずは直接URLでトライ
     ydl_opts = {
         'quiet': True,
         'extract_flat': True,
@@ -54,53 +78,56 @@ def get_video_info(channel_conf):
         'ignoreerrors': True,
     }
     
+    entries = []
+    
     with YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(channel_conf['url'], download=False)
-            
-            # 【修正】ここがエラーの原因でした。infoがNoneの場合の対策を追加
-            if not info:
-                print(f" -> ⚠️ 取得失敗 (Info is None): {channel_conf['name']}")
-                return None
-                
-            if 'entries' not in info:
-                print(f" -> ⚠️ 動画リストが見つかりません: {channel_conf['name']}")
-                return None
+            if info and 'entries' in info:
+                entries = info['entries']
+        except Exception:
+            pass
 
-            for video in info['entries']:
-                if not video: continue
-                title = video.get('title', 'No Title')
-                video_id = video.get('id')
-                
-                # メンバー限定スキップ
-                if "メンバー" in title or "Member" in title:
-                    print(f" -> Skip (Member Only): {title}")
-                    continue
+    # 2. 失敗したら（entriesが空なら）検索機能でバックアップ
+    if not entries:
+        entries = get_video_from_search(channel_conf['search_query'])
 
-                # フィルタリング
-                is_match = False
-                if channel_conf['filter_type'] == 'latest':
-                    if "Shorts" not in title and "ショート" not in title:
-                        is_match = True
-                elif channel_conf['filter_type'] == 'smart_select':
-                    if not any(ex in title for ex in channel_conf['exclude']):
-                        if any(inc in title for inc in channel_conf['include']) or "ドル" in title or "円" in title:
-                            is_match = True
-                
-                if is_match:
-                    return {"id": video_id, "title": title, "author": channel_conf['name']}
-            
-            return None
-        except Exception as e:
-            print(f" -> ⚠️ URL取得エラー: {e}")
-            return None
+    if not entries:
+        print(f" -> ❌ 動画が見つかりませんでした")
+        return None
+
+    # 3. フィルタリング処理
+    for video in entries:
+        if not video: continue
+        title = video.get('title', 'No Title')
+        video_id = video.get('id')
+        
+        # メンバー限定スキップ
+        if "メンバー" in title or "Member" in title:
+            print(f" -> Skip (Member Only): {title}")
+            continue
+
+        # フィルタリング
+        is_match = False
+        if channel_conf['filter_type'] == 'latest':
+            if "Shorts" not in title and "ショート" not in title:
+                is_match = True
+        elif channel_conf['filter_type'] == 'smart_select':
+            if not any(ex in title for ex in channel_conf['exclude']):
+                if any(inc in title for inc in channel_conf['include']) or "ドル" in title or "円" in title:
+                    is_match = True
+        
+        if is_match:
+            return {"id": video_id, "title": title, "author": channel_conf['name']}
+    
+    return None
 
 def get_transcript_text(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja'])
         full_text = " ".join([t['text'] for t in transcript_list])
         return full_text[:20000]
-    except Exception:
+    except:
         try:
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en'])
             full_text = " ".join([t['text'] for t in transcript_list])
@@ -125,9 +152,7 @@ def main():
     for ch in CHANNELS:
         video = get_video_info(ch)
         
-        if not video:
-            print(f" -> 条件に合う動画なし")
-            continue
+        if not video: continue
             
         if video['id'] in processed_ids:
             print(f" -> Skip (既読): {video['title']}")
