@@ -22,9 +22,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # 【重要】YouTube対策済みの「開発版」yt-dlpを直接インストールする
-          pip install https://github.com/yt-dlp/yt-dlp/archive/master.zip
-          pip install google-generativeai requests youtube-transcript-api
+          pip install google-generativeai requests youtube-transcript-api feedparser
           
       - name: Run Monitor Script
         env:
