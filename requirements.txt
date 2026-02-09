@@ -1,6 +1,4 @@
 google-generativeai
-yfinance
 requests
-pandas
-yt-dlp
 youtube-transcript-api
+feedparser
